@@ -53,6 +53,7 @@ public class FeeService {
     }
 
     public BigDecimal calculateFee(BigDecimal amount) {
+        log.debug("Calculating fee for amount: {}", transferFeePolicy.getValue());
 
         if (amount == null) {
             throw new IllegalArgumentException("amount must not be null");

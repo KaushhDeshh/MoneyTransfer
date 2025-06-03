@@ -9,9 +9,12 @@ import com.jpmc.moneytransfer.moneytransfer.transfer.model.Transfer;
 import com.jpmc.moneytransfer.moneytransfer.transfer.model.TransferRequestDTO;
 import com.jpmc.moneytransfer.moneytransfer.transfer.model.TransferState;
 import com.jpmc.moneytransfer.moneytransfer.transfer.repository.TransferRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -41,32 +44,47 @@ public class TransferService {
 
     @Autowired
     private FXConversionService fxConversionService;
+
     @Autowired
     private CommonHelper commonHelper;
 
+    @PersistenceContext
+    private EntityManager em;
 
     /**
-     *  Transfer money from one account to another
-     * @param transferRequestDTO
-     * @return TransferRecord id
-     * @throws TransferRuntimeException
-     * @throws TransferException
+     *  Service Entry Point
      */
-    public Transfer transferMoney(TransferRequestDTO transferRequestDTO) throws TransferRuntimeException, TransferException {
-        // create a transfer record and save it
-        Transfer transfer = createTransferRecord(transferRequestDTO);
+     public Long TransferMoney(TransferRequestDTO transferRequestDTO) throws TransferException, TransferRuntimeException {
+         Transfer transfer = createAndSaveTransfer(transferRequestDTO);
+         log.info("Transfer created : {}", transfer.getId());
+         try {
+             log.info("Performing transfer {}", transfer.getId());
+             checkSelfTransfer(transfer);
+             performTransfer(transfer);
+             log.info("Transfer completed {}", transfer.getId());
+             return transfer.getId();
+         } catch (TransferException | TransferRuntimeException ex) {
+             updateTransferRecordAsFailed(transfer);
+             throw ex;
+         }
 
-        // process transfer record
-        processTransfer(transfer);
+     }
 
-        return transfer;
-    }
+
+     protected void checkSelfTransfer(Transfer transfer) throws TransferException {
+         if(transfer.getFromAccountIdRaw().equals(transfer.getToAccountIdRaw())){
+             throw new TransferException(
+                     TransferException.Reason.SELF_TRANSFER,
+                     "Self transfer not allowed");
+         }
+     }
 
     /**
-     * Used to create Transfer Record sets unverified Account ID's for logging and auditing purposes
-     * @param transferRequestDTO
-     */
-    protected Transfer createTransferRecord(TransferRequestDTO transferRequestDTO) throws TransferException, TransferRuntimeException {
+     *  Opens a DB Transaction and saves a Transfer Record
+     * */
+
+    @Transactional
+    protected Transfer createAndSaveTransfer(TransferRequestDTO transferRequestDTO) throws TransferException ,TransferRuntimeException{
 
         Transfer transfer = new Transfer(
                 transferRequestDTO.getSenderAccountId(),
@@ -74,37 +92,25 @@ public class TransferService {
                 transferRequestDTO.getAmount(),
                 TransferState.PROCESSING);
 
-        return transfer;
-    }
-
-    /**
-     *  Opens a DB Transaction and saves a Transfer Record
-     * @param transfer
-     * @param transferRequestDTO
-     * @return TransferRecord id
-     * */
-
-    @Transactional
-    protected Long createAndSaveTransfer(Transfer transfer, TransferRequestDTO transferRequestDTO) throws TransferException ,TransferRuntimeException{
         try {
             Currency currency = getCurrencyFromDTO(transferRequestDTO.getCurrency());
             transfer.setCurrency(currency);
-            Transfer saved = transferRepository.save(transfer);
+            transfer = transferRepository.save(transfer);
+
             log.info("Transfer transfer {} created (from={} to={} amt={} {})",
-                    saved.getId(),
-                    saved.getFromAccountIdRaw(), saved.getToAccountIdRaw(),
-                    saved.getAmount(), saved.getCurrencyFrom());
+                    transfer.getId(),
+                    transfer.getFromAccountIdRaw(), transfer.getToAccountIdRaw(),
+                    transfer.getAmount(), transfer.getCurrencyFrom());
 
-            return saved.getId();
+            return transfer;
 
-        } catch (DataIntegrityViolationException dive) {
-
-            log.error("Failed to create transfer transfer {}", transfer, dive);
-
+        } catch (DataAccessException dae){
+            log.error("Failed to create transfer transfer {}", transfer, dae);
             throw new TransferRuntimeException(
                     TransferRuntimeException.Reason.DB_CONSTRAINT_VIOLATION,
-                    "Could not create transfer record", dive);
+                    "Could not create transfer record", dae);
         }
+
     }
 
     /**
@@ -119,35 +125,6 @@ public class TransferService {
                         "Unsupported currency code: " + currencyCode));
     }
 
-
-    /**
-     *  Process the transfer record. This is where the actual transfer is processed.
-     *  We can Process Transfer Fee before because Since its cached it doesn't need a db lookup to calculate.
-     * */
-    protected void processTransfer(Transfer transfer) throws TransferException, TransferRuntimeException{
-
-        try {
-            // Preprocess transfer fee (cached, no DB call)
-            processTransferFee(transfer);
-
-            //check if Account IDs are no the same
-            if(transfer.getFromAccountIdRaw().equals(transfer.getToAccountIdRaw())){
-                throw new TransferException(
-                        TransferException.Reason.SELF_TRANSFER,
-                        "Self transfer not allowed");
-            }
-
-            // Preform DB Transaction
-            transfer = performTransfer(transfer);
-
-
-        } catch (TransferException | TransferRuntimeException ex) {
-            //cancels the DB Transaction and sets the transfer record to FAILED
-            updateTransferRecordAsFailed(transfer);
-            throw ex;
-        }
-
-    }
 
 
     /**
@@ -178,18 +155,13 @@ public class TransferService {
      * Marks the transfer record as FAILED and persists the update.
      */
     @Transactional
-    protected void updateTransferRecordAsFailed(Transfer transfer) throws TransferRuntimeException {
+    protected void updateTransferRecordAsFailed(Transfer transfer) {
+        log.info("transfer is in Man state", em.contains(transfer));
         try {
-
             transfer.setState(TransferState.FAILED);
-            transferRepository.save(transfer);
-
             log.warn("Transfer {} marked as FAILED", transfer.getId());
-
-        } catch (Exception e) {
-
-            log.error("Failed to update transfer {} as FAILED", transfer.getId(), e);
-
+        } catch (DataAccessException e) {
+            log.error("DB error while marking transfer {} as FAILED", transfer.getId(), e);
             throw new TransferRuntimeException(
                     TransferRuntimeException.Reason.DB_ERROR,
                     "Failed to mark transfer as failed", e);
@@ -203,54 +175,112 @@ public class TransferService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     protected Transfer performTransfer(Transfer transfer) throws TransferException {
+
+        if(transfer == null){
+           throw new TransferException(
+                    TransferException.Reason.INVALID_TRANSFER_RECORD,
+                    "Invalid transfer record");
+        }
+
+        // Persists the transfer record
+        transferRepository.save(transfer);
+
+        //calculate transfer fee (don't need account locks to do this)
+        processTransferFee(transfer);
+
         // Locking Accounts
         attachLockedAccountsOrdered(transfer);
-        Account sender = transfer.getFromAccount();
-        Account receiver = transfer.getToAccount();
 
-        //setting currency
-        transfer.setCurrencyFrom(sender.getCurrency());
-        transfer.setCurrencyTo(receiver.getCurrency());
+        //Check if currency matches sender's account currency
+        validSenderCurrencyCheck(transfer);
 
-        //Check if Currency is equal to Sender's Account Currency
-        if(!transfer.getCurrencyFrom().equals(transfer.getCurrency())){
+        //calculate and check
+        computeDebit(transfer);
+        inSufficientBalanceCheck(transfer.getFromAccount(), transfer.getDebitAmount());
+
+        log.info("Debit amount for transfer {}: {}", transfer.getId(), transfer.getDebitAmount());
+
+        //convert amount to target currency if necessary
+        computeCreditAmount(transfer);
+
+        log.info("Credit amount for transfer {}: {}", transfer.getId(), transfer.getCreditAmount());
+
+        //perform actual debit and credit operations
+        preformDebitAndCredit(transfer);
+
+        transfer.setState(TransferState.COMPLETED);
+        return transfer;
+    }
+
+    /**
+     *  Performs the actual debit and credit operations.
+     * */
+    protected void preformDebitAndCredit(Transfer transfer) throws TransferRuntimeException {
+        try {
+            Account sender = transfer.getFromAccount();
+            Account receiver = transfer.getToAccount();
+
+            if (sender == null || receiver == null) {
+                throw new TransferRuntimeException(
+                        TransferRuntimeException.Reason.INVALID_ARGUMENT,
+                        "Sender or receiver account is null");
+
+            }
+
+            sender.debit(transfer.getDebitAmount());
+            receiver.credit(transfer.getCreditAmount());
+
+            log.info("Sender {} debited {} | Receiver {} credited {}",
+                    sender.getId(),
+                    transfer.getDebitAmount(),
+                    receiver.getId(),
+                    transfer.getCreditAmount());
+
+        } catch (Exception e) {
+            throw new TransferRuntimeException(
+                    TransferRuntimeException.Reason.UNKNOWN_ERROR,
+                    "Failed to debit or credit accounts", e);
+        }
+
+        log.info("Sender {} debited {} and receiver {} credited {}",
+                transfer.getFromAccount().getId(),
+                transfer.getFromAccount().getBalance(),
+                transfer.getToAccount().getId(),
+                transfer.getToAccount().getBalance());
+    }
+
+    /**
+     *  Ensures a Senders account has sufficient balance.
+     *  */
+    protected void computeDebit(Transfer transfer) {
+        log.info("Computing Debit amount for transfer {}", transfer.getId());
+        BigDecimal totalDebit = transfer.getAmount().add(transfer.getFeeApplied()); // amount + fee
+        transfer.setDebitAmount(totalDebit);
+
+    }
+
+    protected void inSufficientBalanceCheck(Account senderAccount, BigDecimal debitAmount) throws TransferException{
+        log.info("Checking balance for transfer {}", debitAmount);
+        if (senderAccount.getBalance().compareTo(debitAmount) < 0) {
+            throw new TransferException(
+                    TransferException.Reason.INSUFFICIENT_FUNDS,
+                    "Sender balance: " + senderAccount.getBalance() +
+                            ", required: " + debitAmount);
+        }
+    }
+
+
+    /**
+     *  Checks if the given currency matches the sender's account currency.
+     * */
+
+    protected void validSenderCurrencyCheck(Transfer transfer) throws TransferException {
+        log.info("Checking currency for transfer {}", transfer.getId());
+        if(!transfer.getFromAccount().getCurrency().equals(transfer.getCurrency())){
             throw new TransferException(
                     TransferException.Reason.INVALID_CURRENCY,
                     "Currency mismatch from DTO and Sender's Account");
         }
-
-        //Check if Sender has sufficient funds
-        BigDecimal totalDebit = transfer.getAmount().add(transfer.getFeeApplied()); // amount + fee
-        transfer.setDebitAmount(totalDebit);
-        BigDecimal senderBalance = sender.getBalance();
-
-
-        if (senderBalance.compareTo(totalDebit) < 0) {
-            throw new TransferException(
-                    TransferException.Reason.INSUFFICIENT_FUNDS,
-                    "Sender balance: " + senderBalance + ", required: " + totalDebit);
-        }
-
-        //Check if Conversion is required
-        if(!transfer.getCurrencyTo().equals(transfer.getCurrencyFrom())){
-
-            BigDecimal creditAmount = convertTransferAmount(transfer);
-            transfer.setCreditAmount(creditAmount);
-
-        } else{
-
-            transfer.setCreditAmount(transfer.getAmount());
-
-        }
-
-        //these accounts are currently locked so we can debit and credit them safely
-        sender.debit(transfer.getDebitAmount());
-        receiver.credit(transfer.getCreditAmount());
-
-        //mark a transfer as completed
-        transfer.setState(TransferState.COMPLETED);
-
-        return transfer;
     }
 
     /**
@@ -259,6 +289,7 @@ public class TransferService {
      *  This is where the accounts are locked.
      * */
     protected void attachLockedAccountsOrdered(Transfer transfer) throws TransferException {
+        log.info("Locking Accounts {} and {}", transfer.getFromAccountIdRaw(), transfer.getToAccountIdRaw());
         Long senderId = transfer.getFromAccountIdRaw();
         Long receiverId = transfer.getToAccountIdRaw();
 
@@ -282,8 +313,14 @@ public class TransferService {
                             TransferException.Reason.ACCOUNT_NOT_FOUND, "Sender not found"));
         }
 
+        log.info("Locked Accounts {} and {}", transfer.getFromAccountIdRaw(), transfer.getToAccountIdRaw());
         transfer.setFromAccount(sender);
         transfer.setToAccount(receiver);
+
+        validateAccountsHaveCurrency(sender, receiver);
+        transfer.setCurrencyFrom(sender.getCurrency());
+        transfer.setCurrencyTo(receiver.getCurrency());
+
     }
 
 
@@ -306,8 +343,30 @@ public class TransferService {
                 convertedAmount, to.getCode(),
                 fxRate);
 
-
         return convertedAmount;
+    }
+   /**
+    *  computes Credit needed and sets it in the transfer record.
+    *
+    * */
+    protected void computeCreditAmount(Transfer transfer) throws TransferException {
+
+        if(transfer.getCurrencyTo().equals(transfer.getCurrencyFrom())) {
+            transfer.setCreditAmount(transfer.getAmount());
+            return;
+        }
+
+        BigDecimal convertedAmount = convertTransferAmount(transfer);
+        transfer.setCreditAmount(convertedAmount);
+    }
+
+
+    protected void validateAccountsHaveCurrency(Account from, Account to) {
+        if (from.getCurrency() == null || to.getCurrency() == null) {
+            throw new TransferRuntimeException(
+                    TransferRuntimeException.Reason.INVALID_ACCOUNT_STATE,
+                    "One or both accounts have no assigned currency");
+        }
     }
 }
 

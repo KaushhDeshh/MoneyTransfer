@@ -24,6 +24,9 @@ public class TransferRuntimeException extends RuntimeException {
         DB_CONSTRAINT_VIOLATION,
         INVALID_AMOUNT,
         UNKNOWN_ERROR,
-        DB_ERROR,
+        DB_ERROR, NOT_FOUND,
+        INVALID_ARGUMENT,
+        INVALID_ACCOUNT_STATE
+        ;
     }
 }

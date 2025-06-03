@@ -93,16 +93,15 @@ public class TempTestController {
             @Valid @RequestBody TransferRequestDTO dto) {
 
         log.info("Transfer request: {}", dto);
-        Transfer transfer = null;
-
+        Long id = -1L;
         try {
-            transfer = transferService.transferMoney(dto);
+            id = transferService.TransferMoney(dto);
         } catch (Exception e) {
             ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
 
         return ResponseEntity.ok(
-                Map.of("transferId", transfer.getId(),
+                Map.of("transferId", id,
                         "status", "ACCEPTED"));
     }
 

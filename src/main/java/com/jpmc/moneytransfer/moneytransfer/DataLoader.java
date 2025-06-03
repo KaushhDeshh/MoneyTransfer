@@ -33,6 +33,8 @@ public class DataLoader implements CommandLineRunner {
     private static final Logger log = LoggerFactory.getLogger(DataLoader.class);
     @Autowired
     private FXConversionService fXConversionService;
+    @Autowired
+    private FeeService feeService;
 
     @Override
     public void run(String... args) {
@@ -68,6 +70,16 @@ public class DataLoader implements CommandLineRunner {
 
 
         transferPolicyRepository.save(policy);
+
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); // Restore interrupted state
+        }
+
+        //refresh cache
+        feeService.refreshCache();
+
         log.info("TRANSFER_FEE policy created with value = {}", policy.getValue());
     }
 

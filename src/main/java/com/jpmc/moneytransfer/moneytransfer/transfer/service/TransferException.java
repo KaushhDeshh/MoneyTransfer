@@ -25,6 +25,6 @@ public class TransferException extends Exception{
         FX_RATE_MISSING,
         INVALID_CURRENCY,
         INVALID_FEE_AMOUNT,
-        SELF_TRANSFER,
+        SELF_TRANSFER, INVALID_TRANSFER_RECORD,
     }
 }
