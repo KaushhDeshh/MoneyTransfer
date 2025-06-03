@@ -23,5 +23,8 @@ public class TransferException extends Exception{
         INSUFFICIENT_FUNDS,
         ACCOUNT_NOT_FOUND,
         FX_RATE_MISSING,
+        INVALID_CURRENCY,
+        INVALID_FEE_AMOUNT,
+        SELF_TRANSFER,
     }
 }

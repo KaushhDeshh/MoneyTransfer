@@ -52,14 +52,14 @@ public class TransferService {
      * @throws TransferRuntimeException
      * @throws TransferException
      */
-    public Long transferMoney(TransferRequestDTO transferRequestDTO) throws TransferRuntimeException, TransferException {
+    public Transfer transferMoney(TransferRequestDTO transferRequestDTO) throws TransferRuntimeException, TransferException {
         // create a transfer record and save it
         Transfer transfer = createTransferRecord(transferRequestDTO);
 
         // process transfer record
         processTransfer(transfer);
 
-        return transfer.getId();
+        return transfer;
     }
 
     /**
@@ -74,8 +74,7 @@ public class TransferService {
                 transferRequestDTO.getAmount(),
                 TransferState.PROCESSING);
 
-        Long recordId = createAndSaveTransfer(transfer, transferRequestDTO);
-        return recordId;
+        return transfer;
     }
 
     /**
@@ -246,7 +245,7 @@ public class TransferService {
 
         //these accounts are currently locked so we can debit and credit them safely
         sender.debit(transfer.getDebitAmount());
-        receiver.credit(transfer.getDebitAmount());
+        receiver.credit(transfer.getCreditAmount());
 
         //mark a transfer as completed
         transfer.setState(TransferState.COMPLETED);
