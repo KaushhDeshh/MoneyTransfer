@@ -14,6 +14,7 @@ import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,9 @@ public class TransferService {
     @Autowired
     private CommonHelper commonHelper;
 
+    @Autowired
+    private ApplicationContext applicationContext;
+
 
 
     /**
@@ -59,11 +63,16 @@ public class TransferService {
          try {
              log.info("Performing transfer {}", transfer.getId());
              checkSelfTransfer(transfer);
-             performTransfer(transfer);
+
+             //Springs Invokation Issue with Transactional sopes
+             applicationContext.getBean(TransferService.class).performTransfer(transfer);
+
              log.info("Transfer completed {}", transfer.getId());
              return transfer.getId();
          } catch (TransferException | TransferRuntimeException ex) {
-             updateTransferRecordAsFailed(transfer);
+
+             log.error("Transfer failed {}", transfer.getId(), ex);
+             applicationContext.getBean(TransferService.class).updateTransferRecordAsFailed(transfer);
              throw ex;
          }
 
@@ -183,6 +192,7 @@ public class TransferService {
         transfer.setState(TransferState.COMPLETED);
 
         log.info("Transfer {} completed", transfer.getId());
+
 
         return transfer;
     }
