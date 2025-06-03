@@ -4,6 +4,9 @@ import com.jpmc.moneytransfer.moneytransfer.account.model.Account;
 import com.jpmc.moneytransfer.moneytransfer.account.model.Currency;
 import com.jpmc.moneytransfer.moneytransfer.account.repository.AccountRepository;
 import com.jpmc.moneytransfer.moneytransfer.account.repository.CurrencyRepository;
+import com.jpmc.moneytransfer.moneytransfer.transfer.model.TransferRequestDTO;
+import com.jpmc.moneytransfer.moneytransfer.transfer.service.TransferService;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +33,10 @@ public class TempTestController {
     private CommonHelper commonHelper;
 
     private static final Logger log = LoggerFactory.getLogger(TempTestController.class);
+
+    @Autowired
+    private TransferService transferService;
+
     /**
      *  Create a currency and return the newly created currency object
      */
@@ -77,6 +84,25 @@ public class TempTestController {
         public String name;
         public String currencyCode;
         public BigDecimal initialBalance;
+    }
+
+
+    @PostMapping("/transfer")
+    public ResponseEntity<Map<String, Object>> transfer(
+            @Valid @RequestBody TransferRequestDTO dto) {
+
+        log.info("Transfer request: {}", dto);
+
+        Long transferId = null;
+        try {
+            transferId = transferService.transferMoney(dto);
+        } catch (Exception e) {
+            ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+
+        return ResponseEntity.ok(
+                Map.of("transferId", transferId,
+                        "status", "ACCEPTED"));
     }
 
 

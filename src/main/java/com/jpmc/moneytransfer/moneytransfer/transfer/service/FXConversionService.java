@@ -20,16 +20,6 @@ public class FXConversionService {
     //FX rates for each currency pair
     private final Map<Currency, Map<Currency, BigDecimal>> fxRates = new ConcurrentHashMap<>();
 
-    public BigDecimal convertCurrency(Currency fromcurrency, Currency toCurrency, BigDecimal amount) {
-        try{
-
-
-        } catch (Exception e) {
-
-        }
-
-        return null;
-    }
 
     public void addRate(Currency from, Currency to, BigDecimal rate) {
         fxRates.computeIfAbsent(from, k -> new ConcurrentHashMap<>()).put(to, rate);

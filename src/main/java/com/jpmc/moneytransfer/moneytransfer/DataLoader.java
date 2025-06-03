@@ -4,6 +4,7 @@ import com.jpmc.moneytransfer.moneytransfer.account.model.Currency;
 import com.jpmc.moneytransfer.moneytransfer.account.repository.CurrencyRepository;
 import com.jpmc.moneytransfer.moneytransfer.transfer.model.TransferPolicy;
 import com.jpmc.moneytransfer.moneytransfer.transfer.repository.TransferPolicyRepository;
+import com.jpmc.moneytransfer.moneytransfer.transfer.service.FXConversionService;
 import com.jpmc.moneytransfer.moneytransfer.transfer.service.FeeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,12 +31,15 @@ public class DataLoader implements CommandLineRunner {
     TransferPolicyRepository transferPolicyRepository;
 
     private static final Logger log = LoggerFactory.getLogger(DataLoader.class);
+    @Autowired
+    private FXConversionService fXConversionService;
 
     @Override
     public void run(String... args) {
         log.info("Loading data...");
         loadCurrencies();
         loadFeePolicy();
+        loadFXRates();
         log.info("Data loaded successfully.");
     }
 
@@ -66,4 +70,29 @@ public class DataLoader implements CommandLineRunner {
         transferPolicyRepository.save(policy);
         log.info("TRANSFER_FEE policy created with value = {}", policy.getValue());
     }
+
+
+    /**
+     *  Load FX rates
+     * */
+    private void loadFXRates() {
+        Currency usd = currencyRepository.findById("USD")
+                .orElseThrow(() -> new IllegalStateException("USD missing"));
+        Currency aud = currencyRepository.findById("AUD")
+                .orElseThrow(() -> new IllegalStateException("AUD missing"));
+        Currency jpy = currencyRepository.findById("JPY")
+                .orElseThrow(() -> new IllegalStateException("JPY missing"));
+
+        fXConversionService.addRate(usd, aud, BigDecimal.valueOf(2.0));
+        fXConversionService.addRate(aud, usd, BigDecimal.valueOf(0.50));
+
+        fXConversionService.addRate(usd, jpy, BigDecimal.valueOf(150));
+        fXConversionService.addRate(jpy, usd, BigDecimal.valueOf(0.00667));
+
+        fXConversionService.addRate(aud, jpy, BigDecimal.valueOf(75));
+        fXConversionService.addRate(jpy, aud, BigDecimal.valueOf(0.0133));
+
+        log.info("FX rates seeded.");
+    }
+
 }
