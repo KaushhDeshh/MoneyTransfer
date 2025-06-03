@@ -20,13 +20,9 @@ public class TransferRuntimeException extends RuntimeException {
 
     //Runtime exception reasons
     public enum Reason {
-        COULD_NOT_SAVE_TRANSFER,
-        DB_CONSTRAINT_VIOLATION,
-        INVALID_AMOUNT,
         UNKNOWN_ERROR,
-        DB_ERROR, NOT_FOUND,
         INVALID_ARGUMENT,
-        INVALID_ACCOUNT_STATE
-        ;
+        INVALID_ACCOUNT_STATE,
+        FEE_CALCULATION_FAILED;
     }
 }
