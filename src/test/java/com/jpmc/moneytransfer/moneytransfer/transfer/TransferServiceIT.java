@@ -12,10 +12,7 @@ import com.jpmc.moneytransfer.moneytransfer.transfer.repository.TransferReposito
 import com.jpmc.moneytransfer.moneytransfer.transfer.service.FXConversionService;
 import com.jpmc.moneytransfer.moneytransfer.transfer.service.TransferException;
 import com.jpmc.moneytransfer.moneytransfer.transfer.service.TransferService;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -68,6 +65,13 @@ class TransferServiceIT {
         Account receiver = new Account("Bob", usd, new BigDecimal("500.00"));
         accountRepository.saveAll(List.of(sender, receiver));
         fxConversionService.addRate(usd, eur, new BigDecimal("0.80"));
+    }
+
+    @AfterEach
+    void tearDown() {
+        transferRepository.deleteAll();
+        accountRepository.deleteAll();
+        currencyRepository.deleteAll();
     }
 
     @Test
