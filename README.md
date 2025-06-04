@@ -66,6 +66,7 @@ POST http://localhost:8080/test/transfer
   "currency": "USD"
 }
 ```
+I have added a command Line runner to prelaod data you can also take a look at this if you want to test it.
 
 ## Design
 This application is designed as a backend service responsible for handling money transfers between accounts. All business logic related to transfers is encapsulated in the TransferService. It manages validation, currency conversion, fee application, and ensures transactional integrity even under concurrent load.
