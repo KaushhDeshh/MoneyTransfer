@@ -19,9 +19,17 @@ import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.util.Pair;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Random;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 
 @SpringBootTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.ANY) // Use H2
@@ -99,8 +107,7 @@ class TransferServiceIT {
 
         Long transferId = transferService.transferMoney(dto);
 
-        Transfer transfer = transferRepository.findWithAccountsById(transferId).orElseThrow();
-
+        Transfer transfer = transferRepository.findById(transferId).orElseThrow();
         Assertions.assertEquals(TransferState.COMPLETED, transfer.getState());
         Assertions.assertEquals(commonHelper.round(BigDecimal.valueOf(899.0)),transfer.getFromAccount().getBalance());
         Assertions.assertEquals(commonHelper.round(BigDecimal.valueOf(180.0)), transfer.getToAccount().getBalance());
@@ -126,6 +133,124 @@ class TransferServiceIT {
         );
 
         Assertions.assertEquals(TransferException.Reason.FX_RATE_MISSING, ex.getReason());
+    }
+
+    /**
+     *   Cuncurrency test
+     * */
+    @Test
+    void concurrencyTest() throws Exception {
+        List<Account> accounts = createAccounts(10);
+        BigDecimal total = BigDecimal.ZERO;
+
+        // Store account IDs for later reload
+        List<Long> accountIds = accounts.stream()
+                .map(Account::getId)
+                .toList();
+
+        // Get initial balances
+        for (Account a : accounts) {
+            total = total.add(a.getBalance());
+        }
+
+        // Run concurrent transfers
+        BigDecimal fees = runRandomConcurrentTransfers(accounts);
+
+        // Reload the same accounts
+        List<Account> updatedAccounts = accountIds.stream()
+                .map(id -> accountRepository.findById(id).orElseThrow())
+                .toList();
+
+        BigDecimal updatedTotal = updatedAccounts.stream()
+                .map(Account::getBalance)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        Assertions.assertEquals(total, updatedTotal.add(fees), "Mismatch: balances + fees should equal original total");
+
+    }
+
+    public List<Account> createAccounts(int numAccounts) {
+        Currency usd = currencyRepository.findById("USD").orElseThrow();
+
+        List<Account> accounts = new ArrayList<>();
+        for (int i = 0; i < numAccounts; i++) {
+            accounts.add(new Account("Account" + i, usd, new BigDecimal("1000.00")));
+        }
+
+
+        accountRepository.saveAll(accounts);
+
+        return accounts.stream()
+                .map(a -> accountRepository.findById(a.getId()).orElseThrow())
+                .toList();
+    }
+
+    public Pair<Account, Account> pickRandomSenderAndReceiver(List<Account> accounts) {
+        if (accounts.size() < 2) {
+            throw new IllegalArgumentException("Need at least two accounts to pick sender and receiver");
+        }
+
+        Random rand = new Random();
+        Account sender, receiver;
+
+        do {
+            sender = accounts.get(rand.nextInt(accounts.size()));
+            receiver = accounts.get(rand.nextInt(accounts.size()));
+        } while (sender.getId().equals(receiver.getId()));
+
+        return Pair.of(sender, receiver);
+    }
+
+
+    /**
+     *  Runs a random concurrent transfer on the given accounts keeps track of the total fees.
+     * */
+    public BigDecimal runRandomConcurrentTransfers(List<Account> accounts) throws InterruptedException {
+        int numTransfers = 1000;
+        BigDecimal minAmount = new BigDecimal("10.00");
+        BigDecimal maxAmount = new BigDecimal("200.00");
+
+        AtomicReference<BigDecimal> fees = new AtomicReference<>(BigDecimal.ZERO);
+
+        ExecutorService executor = Executors.newFixedThreadPool(numTransfers);
+        CountDownLatch latch = new CountDownLatch(numTransfers);
+
+        for (int i = 0; i < numTransfers; i++) {
+            executor.submit(() -> {
+                try {
+                    Pair<Account, Account> pair = pickRandomSenderAndReceiver(accounts);
+
+                    TransferRequestDTO dto = new TransferRequestDTO();
+                    dto.setSenderAccountId(pair.getFirst().getId());
+                    dto.setReceiverAccountId(pair.getSecond().getId());
+                    dto.setAmount(randomAmount(minAmount, maxAmount));
+                    dto.setCurrency("USD");
+
+                    Long id = transferService.transferMoney(dto);
+
+                    Transfer transfer = transferRepository.findById(id).orElseThrow();
+                    if(transfer.getState() == TransferState.COMPLETED) {
+                        fees.getAndUpdate(t -> t.add(transfer.getFeeApplied()));
+                    }
+
+
+                } catch (Exception e) {
+                    System.out.println("Transfer failed: " + e.getMessage());
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        latch.await();
+        executor.shutdown();
+        return fees.get();
+    }
+
+    private BigDecimal randomAmount(BigDecimal min, BigDecimal max) {
+        BigDecimal range = max.subtract(min);
+        BigDecimal random = BigDecimal.valueOf(Math.random());
+        return commonHelper.round(min.add(range.multiply(random)));
     }
 
 }
