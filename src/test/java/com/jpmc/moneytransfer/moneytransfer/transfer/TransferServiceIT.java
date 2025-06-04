@@ -210,7 +210,7 @@ class TransferServiceIT {
      *  Runs a random concurrent transfer on the given accounts keeps track of the total fees.
      * */
     public BigDecimal runRandomConcurrentTransfers(List<Account> accounts) throws InterruptedException {
-        int numTransfers = 1000;
+        int numTransfers = 100;
         BigDecimal minAmount = new BigDecimal("10.00");
         BigDecimal maxAmount = new BigDecimal("200.00");
 

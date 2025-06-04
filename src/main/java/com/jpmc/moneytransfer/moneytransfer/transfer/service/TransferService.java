@@ -19,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 
+import static com.jpmc.moneytransfer.moneytransfer.CommonHelper.MAX_DB_VALUE;
+
 /**
  * Service for Transferring Money from one account to another
  */
@@ -128,6 +130,11 @@ public class TransferService {
     protected void processTransferFee(Transfer transfer) {
         try {
             BigDecimal fee = feeService.calculateFee(transfer.getAmount());
+            //if fee is negative
+            if (fee == null || fee.compareTo(BigDecimal.ZERO) < 0) {
+                throw new IllegalArgumentException("Fee must be non-null and non-negative");
+            }
+
             transfer.setFeeApplied(fee);
         } catch (Exception e) {
             throw new TransferRuntimeException(
@@ -172,15 +179,11 @@ public class TransferService {
         validSenderCurrencyCheck(transfer);
 
         //calculate and check
-        computeDebit(transfer);
-        inSufficientBalanceCheck(transfer.getFromAccount(), transfer.getDebitAmount());
-
-        log.info("Debit amount for transfer {}: {}", transfer.getId(), transfer.getDebitAmount());
-
-        //convert amount to target currency if necessary
-        computeCreditAmount(transfer);
-
-        log.info("Credit amount for transfer {}: {}", transfer.getId(), transfer.getCreditAmount());
+        computeAmounts(transfer);
+        sufficientBalanceCheck(transfer.getFromAccount(),
+                transfer.getToAccount(),
+                transfer.getDebitAmount(),
+                transfer.getCreditAmount());
 
         //perform actual debit and credit operations
         preformDebitAndCredit(transfer);
@@ -217,20 +220,24 @@ public class TransferService {
         }
     }
 
+
     /**
-     *  Ensures a Senders account has sufficient balance.
-     *  */
-    protected void computeDebit(Transfer transfer) {
-        BigDecimal totalDebit = transfer.getAmount().add(transfer.getFeeApplied()); // amount + fee
-        transfer.setDebitAmount(totalDebit);
-
-    }
-
-    protected void inSufficientBalanceCheck(Account senderAccount, BigDecimal debitAmount) throws TransferException{
-        if (senderAccount.getBalance().compareTo(debitAmount) < 0) {
+     *   Checks if the credit and debit amount are valid
+     * */
+    protected void sufficientBalanceCheck(Account sender, Account receiver, BigDecimal debitAmount, BigDecimal creditAmount) throws TransferException {
+        // Check sender balance
+        if (sender.getBalance().compareTo(debitAmount) < 0) {
             throw new TransferException(
                     TransferException.Reason.INSUFFICIENT_FUNDS,
                     "Insufficient funds for this transaction");
+        }
+
+        // Check if receiver's new balance exceeds DB precision
+        BigDecimal newBalance = receiver.getBalance().add(creditAmount);
+        if (newBalance.compareTo(MAX_DB_VALUE) > 0) {
+            throw new TransferException(
+                    TransferException.Reason.INSUFFICIENT_FUNDS,
+                    "Receiver balance exceeds database precision limit");
         }
     }
 
@@ -257,78 +264,65 @@ public class TransferService {
         Long senderId = transfer.getFromAccountIdRaw();
         Long receiverId = transfer.getToAccountIdRaw();
 
-        Account sender;
-        Account receiver;
-
-        // Always lock accounts in ascending order to avoid deadlocks
+        Account sender, receiver;
         if (senderId < receiverId) {
-            sender = accountRepository.findById(senderId)
-                    .orElseThrow(() -> new TransferException(
-                            TransferException.Reason.ACCOUNT_NOT_FOUND, "Sender not found"));
-            receiver = accountRepository.findById(receiverId)
-                    .orElseThrow(() -> new TransferException(
-                            TransferException.Reason.ACCOUNT_NOT_FOUND, "Receiver not found"));
+            sender = getAccountOrThrow(senderId, "Sender");
+            receiver = getAccountOrThrow(receiverId, "Receiver");
         } else {
-            receiver = accountRepository.findById(receiverId)
-                    .orElseThrow(() -> new TransferException(
-                            TransferException.Reason.ACCOUNT_NOT_FOUND, "Receiver not found"));
-            sender = accountRepository.findById(senderId)
-                    .orElseThrow(() -> new TransferException(
-                            TransferException.Reason.ACCOUNT_NOT_FOUND, "Sender not found"));
+            receiver = getAccountOrThrow(receiverId, "Receiver");
+            sender = getAccountOrThrow(senderId, "Sender");
         }
 
-        log.info("Locked Accounts {} and {}", transfer.getFromAccountIdRaw(), transfer.getToAccountIdRaw());
+        validateAccountsHaveCurrency(sender, receiver);
         transfer.setFromAccount(sender);
         transfer.setToAccount(receiver);
-
-        validateAccountsHaveCurrency(sender, receiver);
         transfer.setCurrencyFrom(sender.getCurrency());
         transfer.setCurrencyTo(receiver.getCurrency());
 
+        log.info("Accounts locked: from={} to={}", senderId, receiverId);
+
+    }
+
+    /**
+     *  Locks Given Account
+     * */
+    private Account getAccountOrThrow(Long id, String role) throws TransferException {
+        return accountRepository.findById(id)
+                .orElseThrow(() -> new TransferException(
+                        TransferException.Reason.ACCOUNT_NOT_FOUND,
+                        role + " account not found: " + id));
+    }
+
+
+
+
+
+    /**
+     *  Computing credit and debit can be tightly coupled so I put them together
+     * */
+    protected void computeAmounts(Transfer transfer) throws TransferException {
+        BigDecimal debit = transfer.getAmount().add(transfer.getFeeApplied());
+        transfer.setDebitAmount(debit);
+        log.info("Debit amount for transfer {}: {}", transfer.getId(), transfer.getDebitAmount());
+
+        if (transfer.getCurrencyFrom().equals(transfer.getCurrencyTo())) {
+            transfer.setCreditAmount(transfer.getAmount());
+        } else {
+            BigDecimal fxRate = fxConversionService.getRate(transfer.getCurrencyFrom(), transfer.getCurrencyTo());
+            BigDecimal converted = commonHelper.multiply(fxRate, transfer.getAmount());
+            transfer.setFxRate(fxRate);
+            transfer.setCreditAmount(converted);
+
+            log.info("Converted {} {} → {} {} @ {}", transfer.getAmount(),
+                    transfer.getCurrencyFrom().getCode(), converted,
+                    transfer.getCurrencyTo().getCode(), fxRate);
+        }
     }
 
 
     /**
-     *  Converts the transfer amount to the target currency.
-     *  This is where the FX rate is fetched from the external service.
+     *  Validates if accounts have currency
      * */
-    protected BigDecimal convertTransferAmount(Transfer transfer) throws TransferException {
-        Currency from = transfer.getCurrencyFrom();
-        Currency to = transfer.getCurrencyTo();
-        BigDecimal originalAmount = transfer.getAmount();
-
-        BigDecimal fxRate = fxConversionService.getRate(from, to);
-        BigDecimal convertedAmount = commonHelper.multiply(fxRate, originalAmount);
-
-        transfer.setFxRate(fxRate);
-
-        log.info("Converted {} {} → {} {} @ rate {}",
-                originalAmount, from.getCode(),
-                convertedAmount, to.getCode(),
-                fxRate);
-
-        return convertedAmount;
-    }
-   /**
-    *  computes Credit needed and sets it in the transfer record.
-    *
-    * */
-    protected void computeCreditAmount(Transfer transfer) throws TransferException {
-        log.info("Currency from {} to",
-                transfer.getCurrencyFrom().getCode(),
-                transfer.getCurrencyTo().getCode());
-        Currency from = transfer.getCurrencyFrom();
-        Currency to = transfer.getCurrencyTo();
-        if(from.equals(to)) {
-            transfer.setCreditAmount(transfer.getAmount());
-            return;
-        }
-
-        BigDecimal convertedAmount = convertTransferAmount(transfer);
-        transfer.setCreditAmount(convertedAmount);
-    }
-
-
     protected void validateAccountsHaveCurrency(Account from, Account to) {
         if (from.getCurrency() == null || to.getCurrency() == null) {
             throw new TransferRuntimeException(

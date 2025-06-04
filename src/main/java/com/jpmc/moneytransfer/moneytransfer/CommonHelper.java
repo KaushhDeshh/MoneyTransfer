@@ -15,6 +15,8 @@ public class CommonHelper {
 
     public static final RoundingMode ROUNDING_MODE = RoundingMode.HALF_UP;
 
+    public static final BigDecimal MAX_DB_VALUE = new BigDecimal("999999999999999999.9999");
+
     /**
      * Rounds the given BigDecimal to the standard money scale using HALF_UP.
      */
