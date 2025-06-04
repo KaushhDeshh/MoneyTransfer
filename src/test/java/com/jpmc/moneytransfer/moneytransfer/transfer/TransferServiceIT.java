@@ -15,17 +15,17 @@ import com.jpmc.moneytransfer.moneytransfer.transfer.service.TransferService;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 @SpringBootTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.ANY) // Use H2
-@Transactional // Each test rolls back automatically
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TransferServiceIT {
 
     @Autowired
@@ -55,30 +55,25 @@ class TransferServiceIT {
         eur = new Currency("EUR", "Euro");
         chf = new Currency("CHF", "Franc");
         currencyRepository.saveAll(List.of(usd, eur, chf));
-
         // Accounts
         Account sender = new Account("Alice", usd, new BigDecimal("1000.00"));
         Account receiver = new Account("Bob", usd, new BigDecimal("500.00"));
         accountRepository.saveAll(List.of(sender, receiver));
-
         fxConversionService.addRate(usd, eur, new BigDecimal("0.80"));
     }
 
     @Test
     void testHappyPathTransfer() throws Exception {
         // Get accounts
-        Account sender = accountRepository.findAll().get(0);
-        Account receiver = accountRepository.findAll().get(1);
-
         // Build transfer request
         TransferRequestDTO dto = new TransferRequestDTO();
-        dto.setSenderAccountId(sender.getId());
-        dto.setReceiverAccountId(receiver.getId());
+        dto.setSenderAccountId(1L);
+        dto.setReceiverAccountId(2L);
         dto.setAmount(new BigDecimal("100.00"));
         dto.setCurrency("USD");
 
         // Call service
-        Long transferId = transferService.TransferMoney(dto);
+        Long transferId = transferService.transferMoney(dto);
 
         // Verify results
         Transfer transfer = transferRepository.findById(transferId).orElseThrow();
@@ -102,9 +97,9 @@ class TransferServiceIT {
         dto.setAmount(new BigDecimal("100.00"));
         dto.setCurrency("USD");
 
-        Long transferId = transferService.TransferMoney(dto);
+        Long transferId = transferService.transferMoney(dto);
 
-        Transfer transfer = transferRepository.findById(transferId).orElseThrow();
+        Transfer transfer = transferRepository.findWithAccountsById(transferId).orElseThrow();
 
         Assertions.assertEquals(TransferState.COMPLETED, transfer.getState());
         Assertions.assertEquals(commonHelper.round(BigDecimal.valueOf(899.0)),transfer.getFromAccount().getBalance());
@@ -127,9 +122,10 @@ class TransferServiceIT {
 
         TransferException ex = Assertions.assertThrows(
                 TransferException.class,
-                () -> transferService.TransferMoney(dto)
+                () -> transferService.transferMoney(dto)
         );
 
         Assertions.assertEquals(TransferException.Reason.FX_RATE_MISSING, ex.getReason());
     }
+
 }

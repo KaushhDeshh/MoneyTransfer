@@ -1,6 +1,8 @@
 package com.jpmc.moneytransfer.moneytransfer;
 
+import com.jpmc.moneytransfer.moneytransfer.account.model.Account;
 import com.jpmc.moneytransfer.moneytransfer.account.model.Currency;
+import com.jpmc.moneytransfer.moneytransfer.account.repository.AccountRepository;
 import com.jpmc.moneytransfer.moneytransfer.account.repository.CurrencyRepository;
 import com.jpmc.moneytransfer.moneytransfer.transfer.model.TransferPolicy;
 import com.jpmc.moneytransfer.moneytransfer.transfer.repository.TransferPolicyRepository;
@@ -14,6 +16,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 import static com.jpmc.moneytransfer.moneytransfer.transfer.service.FeeService.TRANSFER_FEE_POLICY_KEY;
 
@@ -35,6 +38,8 @@ public class DataLoader implements CommandLineRunner {
     private FXConversionService fXConversionService;
     @Autowired
     private FeeService feeService;
+    @Autowired
+    private AccountRepository accountRepository;
 
     @Override
     public void run(String... args) {
@@ -42,6 +47,7 @@ public class DataLoader implements CommandLineRunner {
         loadCurrencies();
         loadFeePolicy();
         loadFXRates();
+        loadTestAccounts();
         log.info("Data loaded successfully.");
     }
 
@@ -105,6 +111,14 @@ public class DataLoader implements CommandLineRunner {
         fXConversionService.addRate(jpy, aud, BigDecimal.valueOf(0.0133));
 
         log.info("FX rates seeded.");
+    }
+
+    private void loadTestAccounts() {
+        Optional<Currency> usd = currencyRepository.findById("USD");
+        Account sender = new Account("Alice", usd.orElse(null), new BigDecimal("1000.00"));
+        Account receiver = new Account("Bob", usd.orElse(null), new BigDecimal("500.00"));
+        accountRepository.saveAll(List.of(sender, receiver));
+
     }
 
 }

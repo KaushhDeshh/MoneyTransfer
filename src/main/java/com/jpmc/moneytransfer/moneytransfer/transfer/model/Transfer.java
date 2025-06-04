@@ -19,11 +19,11 @@ public class Transfer {
     @Column(name = "transfer_id")
     private Long id;
 
-    @ManyToOne(optional = true, fetch = FetchType.LAZY)
+    @ManyToOne(optional = true, fetch = FetchType.EAGER)
     @JoinColumn(name = "from_account_id")
     private Account fromAccount;
 
-    @ManyToOne(optional = true, fetch = FetchType.LAZY)
+    @ManyToOne(optional = true, fetch = FetchType.EAGER)
     @JoinColumn(name = "to_account_id")
     private Account toAccount;
 

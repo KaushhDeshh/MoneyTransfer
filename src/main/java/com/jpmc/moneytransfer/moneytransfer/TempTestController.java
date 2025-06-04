@@ -4,7 +4,6 @@ import com.jpmc.moneytransfer.moneytransfer.account.model.Account;
 import com.jpmc.moneytransfer.moneytransfer.account.model.Currency;
 import com.jpmc.moneytransfer.moneytransfer.account.repository.AccountRepository;
 import com.jpmc.moneytransfer.moneytransfer.account.repository.CurrencyRepository;
-import com.jpmc.moneytransfer.moneytransfer.transfer.model.Transfer;
 import com.jpmc.moneytransfer.moneytransfer.transfer.model.TransferRequestDTO;
 import com.jpmc.moneytransfer.moneytransfer.transfer.service.TransferService;
 import jakarta.validation.Valid;
@@ -95,7 +94,7 @@ public class TempTestController {
         log.info("Transfer request: {}", dto);
         Long id = -1L;
         try {
-            id = transferService.TransferMoney(dto);
+            id = transferService.transferMoney(dto);
         } catch (Exception e) {
             ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }

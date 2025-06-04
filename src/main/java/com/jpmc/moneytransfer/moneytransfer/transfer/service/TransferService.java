@@ -9,14 +9,10 @@ import com.jpmc.moneytransfer.moneytransfer.transfer.model.Transfer;
 import com.jpmc.moneytransfer.moneytransfer.transfer.model.TransferRequestDTO;
 import com.jpmc.moneytransfer.moneytransfer.transfer.model.TransferState;
 import com.jpmc.moneytransfer.moneytransfer.transfer.repository.TransferRepository;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
-import org.springframework.dao.DataAccessException;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,22 +53,23 @@ public class TransferService {
     /**
      *  Service Entry Point
      */
-     public Long TransferMoney(TransferRequestDTO transferRequestDTO) throws TransferException, TransferRuntimeException {
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+     public Long transferMoney(TransferRequestDTO transferRequestDTO) throws TransferException, TransferRuntimeException {
          Transfer transfer = createAndSaveTransfer(transferRequestDTO);
          log.info("Transfer created : {}", transfer.getId());
          try {
              log.info("Performing transfer {}", transfer.getId());
              checkSelfTransfer(transfer);
 
-             //Springs Invokation Issue with Transactional sopes
-             applicationContext.getBean(TransferService.class).performTransfer(transfer);
+             //Springs Invokation Issue with Transactional scopes
+             performTransfer(transfer);
 
              log.info("Transfer completed {}", transfer.getId());
              return transfer.getId();
          } catch (TransferException | TransferRuntimeException ex) {
 
              log.error("Transfer failed {}", transfer.getId(), ex);
-             applicationContext.getBean(TransferService.class).updateTransferRecordAsFailed(transfer);
+             updateTransferRecordAsFailed(transfer);
              throw ex;
          }
 
@@ -91,7 +88,6 @@ public class TransferService {
      *  Opens a DB Transaction and saves a Transfer Record
      * */
 
-    @Transactional
     protected Transfer createAndSaveTransfer(TransferRequestDTO transferRequestDTO) throws TransferException ,TransferRuntimeException{
 
         Transfer transfer = new Transfer(
@@ -155,7 +151,6 @@ public class TransferService {
      *  Preforms the DB Transaction and marks Transfer as Completed.
      * */
 
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     protected Transfer performTransfer(Transfer transfer) throws TransferException {
 
         if(transfer == null){
@@ -319,8 +314,12 @@ public class TransferService {
     *
     * */
     protected void computeCreditAmount(Transfer transfer) throws TransferException {
-
-        if(transfer.getCurrencyTo().equals(transfer.getCurrencyFrom())) {
+        log.info("Currency from {} to",
+                transfer.getCurrencyFrom().getCode(),
+                transfer.getCurrencyTo().getCode());
+        Currency from = transfer.getCurrencyFrom();
+        Currency to = transfer.getCurrencyTo();
+        if(from.equals(to)) {
             transfer.setCreditAmount(transfer.getAmount());
             return;
         }
