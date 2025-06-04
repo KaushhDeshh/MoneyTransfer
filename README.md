@@ -41,7 +41,8 @@ POST http://localhost:8080/test/currency
 Content-Type: application/json
 
 {
-  "code": "USD"
+    "code": "USD",
+    "name": "US Dollar"
 }
 ```
 
