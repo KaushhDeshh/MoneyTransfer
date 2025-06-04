@@ -89,6 +89,8 @@ I did use a scale of 4 for Big Decimal but this in prod would be modified to Ban
 ```
 
 ### Safe Concurrency
+I chose DB-level locking over application locks because multiple services might interact with the database. DB locks are more reliable for ensuring consistency across distributed systems.
+
 To handle concurrent transfers safely, I evaluated three common strategies:
 
 1. Optimistic Locking: Reduces contention but risks stale reads—unsuitable for precise balance handling where overdrafts must be avoided.
@@ -120,4 +122,8 @@ While I didn’t have enough time to fully complete the test suite, I’ve inclu
 
 4. Concurrency test — verifies thread-safe behavior under concurrent transfers.
 (Note: This test works but is currently messy and would benefit from a cleanup/refactor.)
+
+
+## Addiontal Notes
+H2 doesn't fully support row-level locking, even in SQL mode, so concurrency tests may be unreliable. A local PostgreSQL or MySQL instance is recommended for accurate testing.
 
