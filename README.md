@@ -71,6 +71,13 @@ I have added a command Line runner to prelaod data you can also take a look at t
 ## Design
 This application is designed as a backend service responsible for handling money transfers between accounts. All business logic related to transfers is encapsulated in the TransferService. It manages validation, currency conversion, fee application, and ensures transactional integrity even under concurrent load.
 
+
+### Functional
+
+1. Designed TransferPolicy entity to store fee configuration with caching to reduce DB load; structured for future extensibility to support dynamic transfer rules and adaptable policy-based transaction behavior.
+2. Used an in-memory HashMap to mock FX rates for simplicity, avoiding DB persistence due to frequent changes. In production, rates would be fetched from an external source or cached in Redis.(I could be wrong here) :)
+3. The TransferService is designed to be interfaced via DTOs with internal validation. External callers must handle business exceptions like insufficient funds or invalid currency to ensure correct domain behavior.
+4. The Transacions will roll back immediatly in case of any error.
 ### Data Model
 1. Account: Represents a user’s bank account. Each account has a unique ID, name, currency, and balance. The currency determines what denomination the account operates in this is critical to enforcing transfer rules.
 2. Currency: A simple entity storing a currency code (e.g., USD, JPY). Accounts are strictly tied to a base currency, and transfers must respect this constraint.
