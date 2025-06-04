@@ -23,7 +23,7 @@ public class Account extends BaseEntity {
     @Column(nullable = false, length = 100)
     private String name;
 
-    @ManyToOne(optional = false)
+    @ManyToOne(optional = false, fetch = FetchType.EAGER)
     @JoinColumn(name = "currency_code", referencedColumnName = "currency_code")
     private Currency currency;
 
