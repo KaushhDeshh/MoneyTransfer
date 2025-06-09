@@ -17,6 +17,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.util.Pair;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -29,8 +32,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 @SpringBootTest
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.ANY) // Use H2
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+//@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.ANY) // Use H2
+@ActiveProfiles("testmysql")
 class TransferServiceIT {
 
     @Autowired
@@ -48,6 +51,9 @@ class TransferServiceIT {
     private CommonHelper commonHelper;
     @Autowired
     private FXConversionService fxConversionService;
+
+    @Autowired
+    PlatformTransactionManager txManager;
 
     private Currency usd;
     private Currency eur;
@@ -144,7 +150,7 @@ class TransferServiceIT {
      * */
     @Test
     void concurrencyTest() throws Exception {
-        List<Account> accounts = createAccounts(10);
+        List<Account> accounts = createAccounts(100);
         BigDecimal total = BigDecimal.ZERO;
 
         // Store account IDs for later reload
@@ -162,7 +168,8 @@ class TransferServiceIT {
 
         // Reload the same accounts
         List<Account> updatedAccounts = accountIds.stream()
-                .map(id -> accountRepository.findById(id).orElseThrow())
+                .map(id -> accountRepository.findUnlockedById(id)
+                        .orElseThrow(() -> new RuntimeException("Account not found: " + id)))
                 .toList();
 
         BigDecimal updatedTotal = updatedAccounts.stream()
@@ -173,20 +180,21 @@ class TransferServiceIT {
 
     }
 
-    public List<Account> createAccounts(int numAccounts) {
-        Currency usd = currencyRepository.findById("USD").orElseThrow();
 
-        List<Account> accounts = new ArrayList<>();
-        for (int i = 0; i < numAccounts; i++) {
-            accounts.add(new Account("Account" + i, usd, new BigDecimal("1000.00")));
-        }
+    public List<Account> createAccounts(int count) {
+        return new TransactionTemplate(txManager).execute(status -> {
+            Currency usd = currencyRepository.findById("USD").orElseThrow();
 
+            List<Account> accounts = new ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                accounts.add(new Account("Account" + i, usd, new BigDecimal("1000.0000")));
+            }
 
-        accountRepository.saveAll(accounts);
+            accountRepository.saveAll(accounts);
+            accountRepository.flush();
 
-        return accounts.stream()
-                .map(a -> accountRepository.findById(a.getId()).orElseThrow())
-                .toList();
+            return accounts;
+        });
     }
 
     public Pair<Account, Account> pickRandomSenderAndReceiver(List<Account> accounts) {
@@ -210,13 +218,14 @@ class TransferServiceIT {
      *  Runs a random concurrent transfer on the given accounts keeps track of the total fees.
      * */
     public BigDecimal runRandomConcurrentTransfers(List<Account> accounts) throws InterruptedException {
-        int numTransfers = 100;
+        int numTransfers = 10000;
+        int maxThreads = 50;
         BigDecimal minAmount = new BigDecimal("10.00");
         BigDecimal maxAmount = new BigDecimal("200.00");
 
         AtomicReference<BigDecimal> fees = new AtomicReference<>(BigDecimal.ZERO);
 
-        ExecutorService executor = Executors.newFixedThreadPool(numTransfers);
+        ExecutorService executor = Executors.newFixedThreadPool(maxThreads);
         CountDownLatch latch = new CountDownLatch(numTransfers);
 
         for (int i = 0; i < numTransfers; i++) {

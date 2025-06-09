@@ -51,7 +51,6 @@ public class TransferService {
     private ApplicationContext applicationContext;
 
 
-
     /**
      *  Service Entry Point
      */
@@ -260,7 +259,7 @@ public class TransferService {
      *  This is where the accounts are locked.
      * */
     protected void attachLockedAccountsOrdered(Transfer transfer) throws TransferException {
-        log.info("Locking Accounts {} and {}", transfer.getFromAccountIdRaw(), transfer.getToAccountIdRaw());
+        log.info("Locking Accounts {} and {} for Transfer {}", transfer.getFromAccountIdRaw(), transfer.getToAccountIdRaw(), transfer.getId());
         Long senderId = transfer.getFromAccountIdRaw();
         Long receiverId = transfer.getToAccountIdRaw();
 
